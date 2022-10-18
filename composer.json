@@ -1,0 +1,12 @@
+{
+  "name": "webweit/web-promotion-extension",
+  "description": "Advanced Promotion Suite Extension",
+  "type": "plugin",
+  "license": "proprietary",
+  "authors": [
+    {
+      "name": "Ashok kumar Das",
+      "email": "a.das@webweit.de"
+    }
+  ]
+}
