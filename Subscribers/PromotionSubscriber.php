@@ -52,13 +52,39 @@ class PromotionSubscriber implements SubscriberInterface
             'sBasket::sGetBasket::before' => 'beforeGetBasket',
             'sBasket::sGetBasket::after' => 'afterGetBasket',
             "sBasket::sAddVoucher::before" => 'onAddVoucherStart',
+            'Shopware_Modules_Order_SaveOrder_OrderCreated' => 'onAfterOrderCreated',
         ];
+    }
+
+    public function onAfterOrderCreated(\Enlight_Event_EventArgs $args)
+    {
+        $articleDetails = $args->get('details');
+        $orderId = $args->get('orderId');
+
+        $keepPromotionData = $this->session->offsetExists('promotionVouchers') ? $this->session->offsetGet('promotionVouchers') : [];
+        sort($keepPromotionData);
+        if(empty($keepPromotionData[0])) {
+            return;
+        }
+
+        foreach ($articleDetails AS $articleDetail) {
+            if($articleDetail['__s_order_basket_attributes_swag_promotion_id'] == $keepPromotionData[0]['promotionId']) {
+                $this->connection->executeUpdate('UPDATE s_emarketing_voucher_codes SET cashed = 1, userID= ? WHERE code = ?', [intval($articleDetail['userID']), $keepPromotionData[0]['code']]);
+                $this->connection->executeQuery(
+                    "INSERT INTO s_plugin_promotion_customer_count (promotion_id, customer_id, order_id)  VALUES(?, ?, ?)",
+                    [$keepPromotionData[0]['promotionId'], intval($articleDetail['userID']), $orderId]);
+                $this->session->offsetUnset('promotionVouchers');
+            }
+        }
     }
 
     public function onAddVoucherStart(\Enlight_Event_EventArgs $args)
     {
         $params = $this->front->Request()->getParams();
         $voucherCode = $params['sVoucher'];
+        if(empty($voucherCode)) {
+            return;
+        }
         $this->session->offsetUnset('promotionsForVoucherData');
         $promotionsForVoucher = $this->getPromotionsForVoucher($voucherCode);
         if($promotionsForVoucher) {
