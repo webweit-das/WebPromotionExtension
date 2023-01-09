@@ -13,6 +13,7 @@
             <argument type="service" id="swag_promotion.promotion_selector"/>
             <argument type="service" id="front" />
             <argument type="service" id="swag_promotion.currency_converter" />
+            <argument type="service" id="snippets" />
 
             <tag name="shopware.event_subscriber"/>
         </service>

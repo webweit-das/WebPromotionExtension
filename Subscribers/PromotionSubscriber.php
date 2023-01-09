@@ -39,6 +39,7 @@ class PromotionSubscriber implements SubscriberInterface
         private Selector $promotionSelector,
         private \Enlight_Controller_Front $front,
         private CurrencyConverter $currencyConverter,
+        private \Shopware_Components_Snippet_Manager $snippetManager
     )
     {
     }
@@ -52,8 +53,51 @@ class PromotionSubscriber implements SubscriberInterface
             'sBasket::sGetBasket::before' => 'beforeGetBasket',
             'sBasket::sGetBasket::after' => 'afterGetBasket',
             "sBasket::sAddVoucher::before" => 'onAddVoucherStart',
+            "sBasket::sAddVoucher::after" => 'onAfterAddVoucher',
             'Shopware_Modules_Order_SaveOrder_OrderCreated' => 'onAfterOrderCreated',
         ];
+    }
+
+    public function onAddVoucherStart(\Enlight_Event_EventArgs $args)
+    {
+        $params = $this->front->Request()->getParams();
+        $voucherCode = $params['sVoucher'];
+        $this->session->offsetUnset('promotionsForVoucherData');
+        $promotionsForVoucher = $this->getPromotionsForVoucher($voucherCode);
+        if($promotionsForVoucher) {
+            $this->session->offsetSet('promotionsForVoucherData', $promotionsForVoucher);
+        }
+    }
+
+    public function onAfterAddVoucher(\Enlight_Event_EventArgs $args)
+    {
+        $keepPromotionData = $this->session->offsetExists('promotionVouchers') ? $this->session->offsetGet('promotionVouchers') : [];
+        $voucherArticles = $this->hasBasketPromotionArticle();
+        foreach ($voucherArticles AS $key => $voucherArticle) {
+            if(empty($key)) {
+                continue;
+            }
+            $sql = 'DELETE FROM s_order_basket
+            WHERE id = :basketId AND sessionID = :sessionId AND modus = :modus';
+
+            $this->connection->executeQuery(
+                $sql,
+                [
+                    'sessionId' => $this->session->get('sessionId'),
+                    'basketId' => $voucherArticle['basketId'],
+                    'modus' => $voucherArticle['modus']
+                ]
+            );
+        }
+
+        if ((count($voucherArticles) > 1) || ($keepPromotionData && (count($voucherArticles) >= 1))) {
+            $sErrorMessages[] = $this->snippetManager->getNamespace('frontend/basket/internalMessages')->get(
+                'VoucherFailureOnlyOnes',
+                'Only one voucher can be processed in order'
+            );
+
+            return ['sErrorFlag' => true, 'sErrorMessages' => $sErrorMessages];
+        }
     }
 
     public function onAfterOrderCreated(\Enlight_Event_EventArgs $args)
@@ -75,20 +119,6 @@ class PromotionSubscriber implements SubscriberInterface
                     [$keepPromotionData[0]['promotionId'], intval($articleDetail['userID']), $orderId]);
                 $this->session->offsetUnset('promotionVouchers');
             }
-        }
-    }
-
-    public function onAddVoucherStart(\Enlight_Event_EventArgs $args)
-    {
-        $params = $this->front->Request()->getParams();
-        $voucherCode = $params['sVoucher'];
-        if(empty($voucherCode)) {
-            return;
-        }
-        $this->session->offsetUnset('promotionsForVoucherData');
-        $promotionsForVoucher = $this->getPromotionsForVoucher($voucherCode);
-        if($promotionsForVoucher) {
-            $this->session->offsetSet('promotionsForVoucherData', $promotionsForVoucher);
         }
     }
 
@@ -542,13 +572,13 @@ SQL;
     }
 
     private function hasBasketPromotionArticle() {
-        $sql = 'SELECT ob.id AS basketId
+        $sql = 'SELECT ob.id AS basketId, ob.modus
               FROM s_order_basket ob
 
              LEFT JOIN s_order_basket_attributes oba ON ob.id = oba.basketID
 
-             WHERE ob.sessionID = :sessionId AND  oba.swag_promotion_id IS NOT NULL
-             AND ob.modus = 4';
+             WHERE ob.sessionID = :sessionId
+             AND ob.modus IN (2, 4)';
 
         return $this->connection->executeQuery($sql, ['sessionId' => $this->session->get('sessionId'),])->fetchAll();
     }
